@@ -54,3 +54,34 @@ def test_info_returns_model_info(client):
     assert data["model_name"] == "test/model"
     assert data["model_file"] == "test.litertlm"
     assert data["status"] == "ready"
+
+
+def test_find_model_uses_existing_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "test/repo")
+    monkeypatch.setenv("MODELS_DIR", str(tmp_path))
+    model_file = tmp_path / "test-model.litertlm"
+    model_file.write_text("fake")
+
+    from app.main import _find_or_download_model
+    result = _find_or_download_model()
+    assert result == str(model_file)
+
+
+def test_find_model_downloads_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "test/repo")
+    monkeypatch.setenv("MODELS_DIR", str(tmp_path))
+
+    with patch("app.main.huggingface_hub.list_repo_files",
+               return_value=["model.litertlm", "config.json"]), \
+         patch("app.main.huggingface_hub.hf_hub_download",
+               return_value=str(tmp_path / "model.litertlm")) as mock_dl:
+        from app.main import _find_or_download_model
+        result = _find_or_download_model()
+
+    mock_dl.assert_called_once_with(
+        repo_id="test/repo",
+        filename="model.litertlm",
+        local_dir=str(tmp_path),
+        token=None,
+    )
+    assert result == str(tmp_path / "model.litertlm")
