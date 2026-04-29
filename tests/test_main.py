@@ -44,3 +44,13 @@ def test_health_returns_503_when_not_ready():
         assert exc.value.status_code == 503
     finally:
         m._model_status = original
+
+
+def test_info_returns_model_info(client):
+    c, _ = client
+    response = c.get("/info")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["model_name"] == "test/model"
+    assert data["model_file"] == "test.litertlm"
+    assert data["status"] == "ready"

@@ -60,3 +60,12 @@ def health():
     if _model_status != "ready":
         raise HTTPException(status_code=503, detail="Model not ready")
     return {"status": "ok"}
+
+
+@app.get("/info")
+def info():
+    return {
+        "model_name": _model_name,
+        "model_file": _model_file,
+        "status": _model_status,
+    }
