@@ -1,0 +1,12 @@
+services:
+  litert-ai:
+    build: .
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    volumes:
+      - ./models:/app/models
+    environment:
+      - MODEL_NAME=${MODEL_NAME}
+      - PORT=${PORT:-8000}
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    restart: unless-stopped
