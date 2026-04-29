@@ -99,3 +99,18 @@ def test_generate_requires_prompt(client):
     c, _ = client
     response = c.post("/generate", json={})
     assert response.status_code == 422
+
+
+def test_generate_streaming_returns_sse(client):
+    c, mock_conv = client
+    mock_conv.send_message_async.return_value = iter(["Paris", " is", " the capital."])
+
+    response = c.post("/generate", json={"prompt": "Tell me about Paris", "stream": True})
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+
+    lines = [line for line in response.text.splitlines() if line.startswith("data:")]
+    assert lines[0] == 'data: {"chunk": "Paris"}'
+    assert lines[1] == 'data: {"chunk": " is"}'
+    assert lines[2] == 'data: {"chunk": " the capital."}'
+    assert lines[3] == "data: [DONE]"
