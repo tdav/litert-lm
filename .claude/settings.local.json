@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(git:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(code:*)",
+      "Bash(curl -s http://localhost:48000/info)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -X POST http://localhost:48000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"Hello\"}')",
+      "Bash(curl -s http://localhost:48000/health)",
+      "Bash(curl -s -X POST http://localhost:48000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"What is 2+2? Answer briefly.\", \"stream\": false}')",
+      "Bash(curl *)"
+    ]
+  }
+}
