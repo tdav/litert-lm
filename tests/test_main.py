@@ -85,3 +85,17 @@ def test_find_model_downloads_when_missing(tmp_path, monkeypatch):
         token=None,
     )
     assert result == str(tmp_path / "model.litertlm")
+
+
+def test_generate_returns_response(client):
+    c, mock_conv = client
+    response = c.post("/generate", json={"prompt": "What is the capital of France?"})
+    assert response.status_code == 200
+    assert response.json() == {"response": "Paris is the capital of France."}
+    mock_conv.send_message.assert_called_once_with("What is the capital of France?")
+
+
+def test_generate_requires_prompt(client):
+    c, _ = client
+    response = c.post("/generate", json={})
+    assert response.status_code == 422

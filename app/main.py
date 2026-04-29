@@ -38,6 +38,12 @@ def _find_or_download_model() -> str:
     )
 
 
+class GenerateRequest(BaseModel):
+    prompt: str
+    stream: bool = False
+    max_tokens: int = 512
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _engine, _model_name, _model_file, _model_status
@@ -69,3 +75,26 @@ def info():
         "model_file": _model_file,
         "status": _model_status,
     }
+
+
+def _stream_generator(prompt: str):
+    with _engine.create_conversation() as conv:
+        for chunk in conv.send_message_async(prompt):
+            yield f'data: {json.dumps({"chunk": chunk})}\n\n'
+    yield "data: [DONE]\n\n"
+
+
+@app.post("/generate")
+def generate(request: GenerateRequest):
+    if _model_status != "ready":
+        raise HTTPException(status_code=503, detail="Model not ready")
+
+    if request.stream:
+        return StreamingResponse(
+            _stream_generator(request.prompt),
+            media_type="text/event-stream",
+        )
+
+    with _engine.create_conversation() as conv:
+        response = conv.send_message(request.prompt)
+    return {"response": response}
