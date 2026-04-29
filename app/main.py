@@ -1,4 +1,5 @@
 # app/main.py
+import asyncio
 import json
 import os
 import glob
@@ -10,15 +11,17 @@ import litert_lm
 import huggingface_hub
 
 _engine = None
+_engine_cm = None
 _model_name: str = ""
 _model_file: str = ""
 _model_status: str = "loading"
+_load_error: str = ""
 
 
 def _find_or_download_model() -> str:
     models_dir = os.environ.get("MODELS_DIR", "/app/models")
     model_name = os.environ["MODEL_NAME"]
-    token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
 
     os.makedirs(models_dir, exist_ok=True)
     existing = glob.glob(f"{models_dir}/*.litertlm")
@@ -38,24 +41,39 @@ def _find_or_download_model() -> str:
     )
 
 
-class GenerateRequest(BaseModel):
-    prompt: str
-    stream: bool = False
-    max_tokens: int = 512
+async def _load_model_task():
+    global _engine, _engine_cm, _model_file, _model_status, _load_error
+    try:
+        loop = asyncio.get_event_loop()
+        model_path = await loop.run_in_executor(None, _find_or_download_model)
+        _model_file = os.path.basename(model_path)
+        _backend_env = os.environ.get("LITERT_BACKEND", "cpu").lower()
+        _backend = litert_lm.Backend.GPU if _backend_env == "gpu" else litert_lm.Backend.CPU
+        _engine_cm = litert_lm.Engine(model_path, backend=_backend)
+        _engine = _engine_cm.__enter__()
+        _model_status = "ready"
+    except Exception as exc:
+        _load_error = str(exc)
+        _model_status = "error"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _engine, _model_name, _model_file, _model_status
+    global _model_name, _model_status
     _model_name = os.environ.get("MODEL_NAME", "")
-    model_path = _find_or_download_model()
-    _model_file = os.path.basename(model_path)
-    with litert_lm.Engine(model_path) as eng:
-        _engine = eng
-        _model_status = "ready"
-        yield
-    _engine = None
+    _model_status = "loading"
+    task = asyncio.create_task(_load_model_task())
+    yield
+    task.cancel()
+    if _engine_cm is not None:
+        _engine_cm.__exit__(None, None, None)
     _model_status = "stopped"
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    stream: bool = False
+    max_tokens: int = 512
 
 
 app = FastAPI(lifespan=lifespan)
@@ -63,6 +81,8 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
+    if _model_status == "error":
+        raise HTTPException(status_code=500, detail=_load_error)
     if _model_status != "ready":
         raise HTTPException(status_code=503, detail="Model not ready")
     return {"status": "ok"}
@@ -74,18 +94,21 @@ def info():
         "model_name": _model_name,
         "model_file": _model_file,
         "status": _model_status,
+        "error": _load_error or None,
     }
 
 
 def _stream_generator(prompt: str):
     with _engine.create_conversation() as conv:
         for chunk in conv.send_message_async(prompt):
-            yield f'data: {json.dumps({"chunk": chunk})}\n\n'
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
     yield "data: [DONE]\n\n"
 
 
 @app.post("/generate")
 def generate(request: GenerateRequest):
+    if _model_status == "error":
+        raise HTTPException(status_code=500, detail=_load_error)
     if _model_status != "ready":
         raise HTTPException(status_code=503, detail="Model not ready")
 

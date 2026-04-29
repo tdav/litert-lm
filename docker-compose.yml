@@ -9,4 +9,5 @@ services:
       - MODEL_NAME=${MODEL_NAME}
       - PORT=${PORT:-8000}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - LITERT_BACKEND=${LITERT_BACKEND:-cpu}
     restart: unless-stopped
