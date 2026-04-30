@@ -1,5 +1,5 @@
 # tests/test_main.py
-import os
+import json
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
@@ -26,34 +26,111 @@ def client(monkeypatch):
             yield c, mock_conv
 
 
-def test_health_returns_ok(client):
+def test_root_returns_ollama_running(client):
     c, _ = client
-    response = c.get("/health")
+    response = c.get("/")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.text == "Ollama is running"
 
 
-def test_health_returns_503_when_not_ready():
-    import app.main as m
-    original = m._model_status
-    m._model_status = "loading"
-    try:
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as exc:
-            m.health()
-        assert exc.value.status_code == 503
-    finally:
-        m._model_status = original
-
-
-def test_info_returns_model_info(client):
+def test_tags_returns_model_list(client):
     c, _ = client
-    response = c.get("/info")
+    with patch("os.path.getmtime", return_value=1746000000.0), \
+         patch("os.path.getsize", return_value=123456):
+        response = c.get("/api/tags")
     assert response.status_code == 200
     data = response.json()
-    assert data["model_name"] == "test/model"
-    assert data["model_file"] == "test.litertlm"
-    assert data["status"] == "ready"
+    assert len(data["models"]) == 1
+    model = data["models"][0]
+    assert model["name"] == "test"
+    assert model["size"] == 123456
+    assert model["details"]["format"] == "litertlm"
+
+
+def test_show_returns_model_details(client):
+    c, _ = client
+    response = c.post("/api/show", json={"model": "test"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["details"]["format"] == "litertlm"
+    assert "modelfile" in data
+
+
+def test_generate_returns_response(client):
+    c, mock_conv = client
+    response = c.post("/api/generate", json={"model": "test", "prompt": "What is the capital of France?"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["response"] == "Paris is the capital of France."
+    assert data["done"] is True
+    assert "model" in data
+    assert "created_at" in data
+    mock_conv.send_message.assert_called_once_with("What is the capital of France?")
+
+
+def test_generate_requires_prompt(client):
+    c, _ = client
+    response = c.post("/api/generate", json={"model": "test"})
+    assert response.status_code == 422
+
+
+def test_generate_streaming_returns_ndjson(client):
+    c, mock_conv = client
+    mock_conv.send_message_async.return_value = iter(["Paris", " is", " the capital."])
+
+    response = c.post("/api/generate", json={"model": "test", "prompt": "Tell me about Paris", "stream": True})
+    assert response.status_code == 200
+    assert "application/x-ndjson" in response.headers["content-type"]
+
+    lines = [line for line in response.text.splitlines() if line.strip()]
+    chunks = [json.loads(line) for line in lines]
+    assert chunks[0]["response"] == "Paris"
+    assert chunks[0]["done"] is False
+    assert chunks[1]["response"] == " is"
+    assert chunks[2]["response"] == " the capital."
+    assert chunks[-1]["done"] is True
+    assert chunks[-1]["response"] == ""
+
+
+def test_chat_returns_response(client):
+    c, mock_conv = client
+    response = c.post("/api/chat", json={
+        "model": "test",
+        "messages": [{"role": "user", "content": "What is the capital of France?"}],
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"]["role"] == "assistant"
+    assert data["message"]["content"] == "Paris is the capital of France."
+    assert data["done"] is True
+    mock_conv.send_message.assert_called_once_with("user: What is the capital of France?")
+
+
+def test_chat_requires_messages(client):
+    c, _ = client
+    response = c.post("/api/chat", json={"model": "test"})
+    assert response.status_code == 422
+
+
+def test_chat_streaming_returns_ndjson(client):
+    c, mock_conv = client
+    mock_conv.send_message_async.return_value = iter(["Paris", " is", " the capital."])
+
+    response = c.post("/api/chat", json={
+        "model": "test",
+        "messages": [{"role": "user", "content": "Tell me about Paris"}],
+        "stream": True,
+    })
+    assert response.status_code == 200
+    assert "application/x-ndjson" in response.headers["content-type"]
+
+    lines = [line for line in response.text.splitlines() if line.strip()]
+    chunks = [json.loads(line) for line in lines]
+    assert chunks[0]["message"]["role"] == "assistant"
+    assert chunks[0]["message"]["content"] == "Paris"
+    assert chunks[0]["done"] is False
+    assert chunks[-1]["done"] is True
+    assert chunks[-1]["message"]["content"] == ""
 
 
 def test_find_model_uses_existing_file(tmp_path, monkeypatch):
@@ -85,32 +162,3 @@ def test_find_model_downloads_when_missing(tmp_path, monkeypatch):
         token=None,
     )
     assert result == str(tmp_path / "model.litertlm")
-
-
-def test_generate_returns_response(client):
-    c, mock_conv = client
-    response = c.post("/generate", json={"prompt": "What is the capital of France?"})
-    assert response.status_code == 200
-    assert response.json() == {"response": "Paris is the capital of France."}
-    mock_conv.send_message.assert_called_once_with("What is the capital of France?")
-
-
-def test_generate_requires_prompt(client):
-    c, _ = client
-    response = c.post("/generate", json={})
-    assert response.status_code == 422
-
-
-def test_generate_streaming_returns_sse(client):
-    c, mock_conv = client
-    mock_conv.send_message_async.return_value = iter(["Paris", " is", " the capital."])
-
-    response = c.post("/generate", json={"prompt": "Tell me about Paris", "stream": True})
-    assert response.status_code == 200
-    assert "text/event-stream" in response.headers["content-type"]
-
-    lines = [line for line in response.text.splitlines() if line.startswith("data:")]
-    assert lines[0] == 'data: {"chunk": "Paris"}'
-    assert lines[1] == 'data: {"chunk": " is"}'
-    assert lines[2] == 'data: {"chunk": " the capital."}'
-    assert lines[3] == "data: [DONE]"
