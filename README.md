@@ -41,75 +41,141 @@ docker run -d \
 
 ## API
 
-### `GET /info` — статус сервера
+Совместим с [Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md). Клиенты OpenWebUI, Continue.dev и другие работают без изменений.
+
+### `GET /` — проверка работоспособности
 
 ```bash
-curl http://localhost:8000/info
+curl http://localhost:8000/
+```
+
+```
+Ollama is running
+```
+
+### `GET /api/tags` — список моделей
+
+```bash
+curl http://localhost:8000/api/tags
 ```
 
 ```json
 {
-  "model_name": "litert-community/gemma-4-E4B-it-litert-lm",
-  "model_file": "gemma-4-E4B-it-litert-lm.litertlm",
-  "status": "ready",
-  "error": null
+  "models": [
+    {
+      "name": "gemma-4-E4B-it",
+      "model": "gemma-4-E4B-it",
+      "modified_at": "2026-04-30T12:00:00Z",
+      "size": 4294967296,
+      "digest": "",
+      "details": {
+        "format": "litertlm",
+        "family": "gemma",
+        "parameter_size": "",
+        "quantization_level": ""
+      }
+    }
+  ]
 }
 ```
 
-Возможные значения `status`: `loading`, `ready`, `error`, `stopped`.
+Возвращает `"models": []`, пока модель ещё загружается.
 
-### `GET /health` — health check
+### `POST /api/show` — информация о модели
 
 ```bash
-curl http://localhost:8000/health
+curl -X POST http://localhost:8000/api/show \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gemma-4-E4B-it"}'
 ```
 
-- `200 OK` — модель готова
-- `503 Service Unavailable` — модель загружается
-- `500 Internal Server Error` — ошибка загрузки модели
+```json
+{
+  "modelfile": "",
+  "parameters": "",
+  "template": "",
+  "details": {"format": "litertlm", "family": "gemma", "parameter_size": "", "quantization_level": ""}
+}
+```
 
-### `POST /generate` — генерация текста
+### `POST /api/generate` — генерация текста
 
 **Без стриминга:**
 
 ```bash
-curl -X POST http://localhost:8000/generate \
+curl -X POST http://localhost:8000/api/generate \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Расскажи историю", "stream": false, "max_tokens": 512}'
+  -d '{"model": "gemma-4-E4B-it", "prompt": "Расскажи историю", "stream": false}'
+```
+
+```json
+{"model": "gemma-4-E4B-it", "created_at": "2026-04-30T12:00:00Z", "response": "...", "done": true}
+```
+
+**Со стримингом (NDJSON):**
+
+```bash
+curl -X POST http://localhost:8000/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gemma-4-E4B-it", "prompt": "Расскажи историю", "stream": true}'
+```
+
+```
+{"model":"gemma-4-E4B-it","created_at":"...","response":"Жил","done":false}
+{"model":"gemma-4-E4B-it","created_at":"...","response":"-был","done":false}
+{"model":"gemma-4-E4B-it","created_at":"...","response":"","done":true}
+```
+
+**Параметры:**
+
+| Поле | Тип | По умолчанию | Описание |
+|---|---|---|---|
+| `model` | string | — | Имя модели (принимается, игнорируется — движок один) |
+| `prompt` | string | **обязательный** | Текст запроса |
+| `stream` | bool | `false` | NDJSON-стриминг |
+| `options.num_predict` | int | `512` | Принимается для совместимости, не применяется |
+
+### `POST /api/chat` — чат с историей сообщений
+
+**Без стриминга:**
+
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gemma-4-E4B-it", "messages": [{"role": "user", "content": "Привет!"}]}'
 ```
 
 ```json
 {
-  "response": {
-    "role": "assistant",
-    "content": [{"type": "text", "text": "..."}]
-  }
+  "model": "gemma-4-E4B-it",
+  "created_at": "2026-04-30T12:00:00Z",
+  "message": {"role": "assistant", "content": "Привет! Чем могу помочь?"},
+  "done": true
 }
 ```
 
-**Со стримингом (SSE):**
+**Со стримингом:**
 
 ```bash
-curl -X POST http://localhost:8000/generate \
+curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
-  -H "Accept: text/event-stream" \
-  -d '{"prompt": "Расскажи историю", "stream": true}'
+  -d '{"model": "gemma-4-E4B-it", "messages": [{"role": "user", "content": "Привет!"}], "stream": true}'
 ```
 
 ```
-data: {"chunk": {"role": "assistant", "content": [{"type": "text", "text": "Жил"}]}}
-data: {"chunk": {"role": "assistant", "content": [{"type": "text", "text": "-был"}]}}
-...
-data: [DONE]
+{"model":"gemma-4-E4B-it","created_at":"...","message":{"role":"assistant","content":"Привет"},"done":false}
+{"model":"gemma-4-E4B-it","created_at":"...","message":{"role":"assistant","content":""},"done":true}
 ```
 
-**Параметры запроса:**
+**Параметры:**
 
 | Поле | Тип | По умолчанию | Описание |
 |---|---|---|---|
-| `prompt` | string | — | Текст запроса |
-| `stream` | bool | `false` | Включить SSE стриминг |
-| `max_tokens` | int | `512` | Максимальное количество токенов |
+| `model` | string | — | Имя модели |
+| `messages` | array | **обязательный** | `[{"role": "user"/"system"/"assistant", "content": "..."}]` |
+| `stream` | bool | `false` | NDJSON-стриминг |
+
+> Все сообщения конкатенируются в один prompt. Клиент управляет историей самостоятельно (stateless).
 
 ## Поддерживаемые модели
 
