@@ -133,10 +133,14 @@ def tags():
     if _model_status != "ready":
         return {"models": []}
     name = os.path.splitext(_model_file)[0]
-    mtime = datetime.fromtimestamp(
-        os.path.getmtime(_model_path), tz=timezone.utc
-    ).strftime("%Y-%m-%dT%H:%M:%SZ")
-    size = os.path.getsize(_model_path)
+    try:
+        mtime = datetime.fromtimestamp(
+            os.path.getmtime(_model_path), tz=timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        size = os.path.getsize(_model_path)
+    except OSError:
+        mtime = ""
+        size = 0
     return {
         "models": [
             {
@@ -200,6 +204,8 @@ def _chat_stream(prompt: str):
 @app.post("/api/generate")
 def generate(request: GenerateRequest):
     _check_ready()
+    # options.num_predict is accepted for API compatibility but not forwarded;
+    # litert_lm.Engine does not currently expose a max-tokens parameter
     if request.stream:
         return StreamingResponse(
             _generate_stream(request.prompt),

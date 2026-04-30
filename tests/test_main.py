@@ -162,3 +162,35 @@ def test_find_model_downloads_when_missing(tmp_path, monkeypatch):
         token=None,
     )
     assert result == str(tmp_path / "model.litertlm")
+
+
+def test_generate_returns_503_when_not_ready():
+    import app.main as m
+    from unittest.mock import patch, MagicMock
+    # Patch _find_or_download_model so lifespan's background task never
+    # completes and flips _model_status away from "loading".
+    with patch("app.main._find_or_download_model", side_effect=Exception("blocked")), \
+         patch("app.main.litert_lm.Engine", return_value=MagicMock()):
+        m._model_status = "loading"
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with TestClient(app, raise_server_exceptions=False) as c:
+            # Force status to loading right before the request so even a
+            # racing background task cannot flip it.
+            m._model_status = "loading"
+            response = c.post("/api/generate", json={"prompt": "hi"})
+    assert response.status_code == 503
+
+
+def test_show_returns_404_when_not_ready():
+    import app.main as m
+    from unittest.mock import patch, MagicMock
+    with patch("app.main._find_or_download_model", side_effect=Exception("blocked")), \
+         patch("app.main.litert_lm.Engine", return_value=MagicMock()):
+        m._model_status = "loading"
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with TestClient(app, raise_server_exceptions=False) as c:
+            m._model_status = "loading"
+            response = c.post("/api/show", json={"model": "test"})
+    assert response.status_code == 404
