@@ -201,6 +201,7 @@ def test_show_returns_404_when_not_ready():
         from app.main import app
         with TestClient(app, raise_server_exceptions=False) as c:
             m._model_status = "loading"
+            m._load_error = ""
             response = c.post("/api/show", json={"model": "test"})
     assert response.status_code == 404
 
