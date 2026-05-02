@@ -33,7 +33,7 @@ def _find_or_download_model() -> str:
         print(f"[startup] Found model: {os.path.basename(existing[0])}", flush=True)
         return existing[0]
 
-    print(f"[startup] Downloading {model_name} from HuggingFace...", flush=True)
+    print(f"[startup] Downloading {model_name} from Hugging Face...", flush=True)
     files = list(huggingface_hub.list_repo_files(repo_id=model_name, token=token))
     litertlm_files = [f for f in files if f.endswith(".litertlm")]
     if not litertlm_files:
@@ -56,12 +56,15 @@ async def _load_model_task():
         _model_file = os.path.basename(path)
         _backend_env = os.environ.get("LITERT_BACKEND", "cpu").lower()
         _backend = litert_lm.Backend.GPU if _backend_env == "gpu" else litert_lm.Backend.CPU
+        print("[startup] Loading model into engine...", flush=True)
         _engine_cm = litert_lm.Engine(path, backend=_backend)
         _engine = _engine_cm.__enter__()
         _model_status = "ready"
+        print("[startup] Model ready", flush=True)
     except Exception as exc:
         _load_error = str(exc)
         _model_status = "error"
+        print(f"[startup] ERROR: {exc}", flush=True)
 
 
 @asynccontextmanager

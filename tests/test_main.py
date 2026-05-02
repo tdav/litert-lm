@@ -169,7 +169,7 @@ def test_find_model_downloads_when_missing(tmp_path, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert f"[startup] Searching for model in {str(tmp_path)}" in out
-    assert "[startup] Downloading test/repo from HuggingFace..." in out
+    assert "[startup] Downloading test/repo from Hugging Face..." in out
 
 
 def test_generate_returns_503_when_not_ready():
@@ -186,6 +186,7 @@ def test_generate_returns_503_when_not_ready():
             # Force status to loading right before the request so even a
             # racing background task cannot flip it.
             m._model_status = "loading"
+            m._load_error = ""
             response = c.post("/api/generate", json={"prompt": "hi"})
     assert response.status_code == 503
 
@@ -222,6 +223,7 @@ def test_load_model_task_logs_ready(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[startup] Loading model into engine..." in out
     assert "[startup] Model ready" in out
+    assert m._model_status == "ready"
 
 
 def test_load_model_task_logs_error(monkeypatch, capsys):
