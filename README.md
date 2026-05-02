@@ -25,6 +25,12 @@ docker run -d \
   -v $(pwd)/models:/app/models \
   -p 8000:8000 \
   litert-ai
+
+
+docker tag litert-ai tdav/litert-ai:latest
+
+docker push tdav/litert-ai:latest
+
 ```
 
 ## Переменные окружения
