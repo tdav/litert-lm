@@ -145,7 +145,7 @@ def test_find_model_uses_existing_file(tmp_path, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert f"[startup] Searching for model in {str(tmp_path)}" in out
-    assert "[startup] Found model: test-model.litertlm" in out
+    assert f"[startup] Found model: {model_file.name}" in out
 
 
 def test_find_model_downloads_when_missing(tmp_path, monkeypatch, capsys):

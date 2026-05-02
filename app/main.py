@@ -27,10 +27,13 @@ def _find_or_download_model() -> str:
     token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
 
     os.makedirs(models_dir, exist_ok=True)
+    print(f"[startup] Searching for model in {models_dir}...", flush=True)
     existing = glob.glob(f"{models_dir}/*.litertlm")
     if existing:
+        print(f"[startup] Found model: {os.path.basename(existing[0])}", flush=True)
         return existing[0]
 
+    print(f"[startup] Downloading {model_name} from HuggingFace...", flush=True)
     files = list(huggingface_hub.list_repo_files(repo_id=model_name, token=token))
     litertlm_files = [f for f in files if f.endswith(".litertlm")]
     if not litertlm_files:
