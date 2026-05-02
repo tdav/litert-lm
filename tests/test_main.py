@@ -133,7 +133,7 @@ def test_chat_streaming_returns_ndjson(client):
     assert chunks[-1]["message"]["content"] == ""
 
 
-def test_find_model_uses_existing_file(tmp_path, monkeypatch):
+def test_find_model_uses_existing_file(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MODEL_NAME", "test/repo")
     monkeypatch.setenv("MODELS_DIR", str(tmp_path))
     model_file = tmp_path / "test-model.litertlm"
@@ -143,8 +143,12 @@ def test_find_model_uses_existing_file(tmp_path, monkeypatch):
     result = _find_or_download_model()
     assert result == str(model_file)
 
+    out = capsys.readouterr().out
+    assert f"[startup] Searching for model in {str(tmp_path)}" in out
+    assert "[startup] Found model: test-model.litertlm" in out
 
-def test_find_model_downloads_when_missing(tmp_path, monkeypatch):
+
+def test_find_model_downloads_when_missing(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MODEL_NAME", "test/repo")
     monkeypatch.setenv("MODELS_DIR", str(tmp_path))
 
@@ -162,6 +166,10 @@ def test_find_model_downloads_when_missing(tmp_path, monkeypatch):
         token=None,
     )
     assert result == str(tmp_path / "model.litertlm")
+
+    out = capsys.readouterr().out
+    assert f"[startup] Searching for model in {str(tmp_path)}" in out
+    assert "[startup] Downloading test/repo from HuggingFace..." in out
 
 
 def test_generate_returns_503_when_not_ready():
