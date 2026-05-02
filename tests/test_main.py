@@ -202,3 +202,37 @@ def test_show_returns_404_when_not_ready():
             m._model_status = "loading"
             response = c.post("/api/show", json={"model": "test"})
     assert response.status_code == 404
+
+
+def test_load_model_task_logs_ready(monkeypatch, capsys):
+    import asyncio
+    import app.main as m
+
+    monkeypatch.setenv("MODEL_NAME", "test/repo")
+    monkeypatch.setenv("LITERT_BACKEND", "cpu")
+
+    mock_eng = MagicMock()
+    mock_eng.__enter__ = MagicMock(return_value=mock_eng)
+    mock_eng.__exit__ = MagicMock(return_value=False)
+
+    with patch("app.main._find_or_download_model", return_value="/tmp/test.litertlm"), \
+         patch("app.main.litert_lm.Engine", return_value=mock_eng):
+        asyncio.run(m._load_model_task())
+
+    out = capsys.readouterr().out
+    assert "[startup] Loading model into engine..." in out
+    assert "[startup] Model ready" in out
+
+
+def test_load_model_task_logs_error(monkeypatch, capsys):
+    import asyncio
+    import app.main as m
+
+    monkeypatch.setenv("MODEL_NAME", "test/repo")
+
+    with patch("app.main._find_or_download_model", side_effect=RuntimeError("disk full")):
+        asyncio.run(m._load_model_task())
+
+    out = capsys.readouterr().out
+    assert "[startup] ERROR: disk full" in out
+    assert m._model_status == "error"
