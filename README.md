@@ -39,6 +39,33 @@ docker run -d \
 
 > При первом запуске модель автоматически скачивается с Hugging Face. Сервер отвечает на запросы сразу, пока модель загружается (статус `loading`).
 
+## Консольный вывод при старте
+
+При запуске сервер печатает прогресс загрузки модели. **Первый запуск** (модель скачивается):
+
+```
+[startup] Searching for model in /app/models...
+[startup] Downloading litert-community/gemma-4-E4B-it-litert-lm from Hugging Face...
+gemma-4-E4B-it.litertlm:  34%|████      | 1.2G/3.5G [00:42<01:18, 29.1MB/s]
+[startup] Loading model into engine...
+[startup] Model ready
+```
+
+**Повторный запуск** (модель уже в кэше):
+
+```
+[startup] Searching for model in /app/models...
+[startup] Found model: gemma-4-E4B-it.litertlm
+[startup] Loading model into engine...
+[startup] Model ready
+```
+
+В случае ошибки:
+
+```
+[startup] ERROR: No .litertlm file found in repo <model_name>
+```
+
 ## API
 
 Совместим с [Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md). Клиенты OpenWebUI, Continue.dev и другие работают без изменений.

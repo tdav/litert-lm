@@ -3,6 +3,8 @@ import asyncio
 import json
 import os
 import glob
+import threading
+import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -19,6 +21,8 @@ _model_file: str = ""
 _model_path: str = ""
 _model_status: str = "loading"
 _load_error: str = ""
+_MAX_CONCURRENT: int = int(os.environ.get("MAX_CONCURRENT_REQUESTS", "4"))
+_engine_semaphore: asyncio.Semaphore | None = None
 
 
 def _find_or_download_model() -> str:
@@ -39,12 +43,34 @@ def _find_or_download_model() -> str:
     if not litertlm_files:
         raise RuntimeError(f"No .litertlm file found in repo {model_name}")
 
-    return huggingface_hub.hf_hub_download(
-        repo_id=model_name,
-        filename=litertlm_files[0],
-        local_dir=models_dir,
-        token=token,
-    )
+    filename = litertlm_files[0]
+    url = huggingface_hub.hf_hub_url(repo_id=model_name, filename=filename)
+    dest = os.path.join(models_dir, os.path.basename(filename))
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req) as r:
+        total = int(r.headers.get("Content-Length") or 0)
+        downloaded = 0
+        last_pct = -1
+        with open(dest, "wb") as f:
+            while True:
+                chunk = r.read(8 * 1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total:
+                    pct = downloaded * 100 // total
+                    if pct >= last_pct + 10:
+                        last_pct = pct
+                        print(
+                            f"[startup] Downloading... {pct}%"
+                            f" ({downloaded / 1048576:.0f}/{total / 1048576:.0f} MB)",
+                            flush=True,
+                        )
+    print(f"[startup] Download complete: {os.path.basename(dest)}", flush=True)
+    return dest
 
 
 async def _load_model_task():
@@ -69,9 +95,10 @@ async def _load_model_task():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _model_name, _model_status
+    global _model_name, _model_status, _engine_semaphore
     _model_name = os.environ.get("MODEL_NAME", "")
     _model_status = "loading"
+    _engine_semaphore = asyncio.Semaphore(_MAX_CONCURRENT)
     task = asyncio.create_task(_load_model_task())
     yield
     task.cancel()
@@ -173,6 +200,43 @@ def show(request: ShowRequest):
     }
 
 
+async def _stream_with_semaphore(sync_gen_fn, *args):
+    """Acquire engine semaphore for the full duration of a streaming response."""
+    async with _engine_semaphore:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=8)
+        stop_event = threading.Event()
+
+        def worker():
+            try:
+                for chunk in sync_gen_fn(*args):
+                    if stop_event.is_set():
+                        break
+                    asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(timeout=10.0)
+            except Exception as exc:
+                try:
+                    asyncio.run_coroutine_threadsafe(queue.put(exc), loop).result(timeout=1.0)
+                except Exception:
+                    pass
+            finally:
+                try:
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=1.0)
+                except Exception:
+                    pass
+
+        loop.run_in_executor(None, worker)
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        except GeneratorExit:
+            stop_event.set()
+
+
 def _generate_stream(prompt: str):
     with _engine.create_conversation() as conv:
         for chunk in conv.send_message_async(prompt):
@@ -208,17 +272,21 @@ def _chat_stream(prompt: str):
 
 
 @app.post("/api/generate")
-def generate(request: GenerateRequest):
+async def generate(request: GenerateRequest):
     _check_ready()
     # options.num_predict is accepted for API compatibility but not forwarded;
     # litert_lm.Engine does not currently expose a max-tokens parameter
     if request.stream:
         return StreamingResponse(
-            _generate_stream(request.prompt),
+            _stream_with_semaphore(_generate_stream, request.prompt),
             media_type="application/x-ndjson",
         )
-    with _engine.create_conversation() as conv:
-        response = conv.send_message(request.prompt)
+    loop = asyncio.get_running_loop()
+    async with _engine_semaphore:
+        def _call():
+            with _engine.create_conversation() as conv:
+                return conv.send_message(request.prompt)
+        response = await loop.run_in_executor(None, _call)
     return {
         "model": _model_name,
         "created_at": _now_iso(),
@@ -228,16 +296,20 @@ def generate(request: GenerateRequest):
 
 
 @app.post("/api/chat")
-def chat(request: ChatRequest):
+async def chat(request: ChatRequest):
     _check_ready()
     prompt = "\n".join(f"{m.role}: {m.content}" for m in request.messages)
     if request.stream:
         return StreamingResponse(
-            _chat_stream(prompt),
+            _stream_with_semaphore(_chat_stream, prompt),
             media_type="application/x-ndjson",
         )
-    with _engine.create_conversation() as conv:
-        response = conv.send_message(prompt)
+    loop = asyncio.get_running_loop()
+    async with _engine_semaphore:
+        def _call():
+            with _engine.create_conversation() as conv:
+                return conv.send_message(prompt)
+        response = await loop.run_in_executor(None, _call)
     return {
         "model": _model_name,
         "created_at": _now_iso(),

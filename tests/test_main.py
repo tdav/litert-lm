@@ -152,41 +152,41 @@ def test_find_model_downloads_when_missing(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MODEL_NAME", "test/repo")
     monkeypatch.setenv("MODELS_DIR", str(tmp_path))
 
+    fake_content = b"fake model data"
+    mock_response = MagicMock()
+    mock_response.headers.get.return_value = str(len(fake_content))
+    mock_response.read.side_effect = [fake_content, b""]
+    mock_response.__enter__ = lambda s: s
+    mock_response.__exit__ = MagicMock(return_value=False)
+
     with patch("app.main.huggingface_hub.list_repo_files",
                return_value=["model.litertlm", "config.json"]), \
-         patch("app.main.huggingface_hub.hf_hub_download",
-               return_value=str(tmp_path / "model.litertlm")) as mock_dl:
+         patch("app.main.huggingface_hub.hf_hub_url",
+               return_value="https://fake/model.litertlm") as mock_url, \
+         patch("app.main.urllib.request.Request", return_value=MagicMock()), \
+         patch("app.main.urllib.request.urlopen", return_value=mock_response):
         from app.main import _find_or_download_model
         result = _find_or_download_model()
 
-    mock_dl.assert_called_once_with(
-        repo_id="test/repo",
-        filename="model.litertlm",
-        local_dir=str(tmp_path),
-        token=None,
-    )
+    mock_url.assert_called_once_with(repo_id="test/repo", filename="model.litertlm")
     assert result == str(tmp_path / "model.litertlm")
 
     out = capsys.readouterr().out
     assert f"[startup] Searching for model in {str(tmp_path)}" in out
     assert "[startup] Downloading test/repo from Hugging Face..." in out
+    assert "[startup] Download complete: model.litertlm" in out
 
 
 def test_generate_returns_503_when_not_ready():
     import app.main as m
-    from unittest.mock import patch, MagicMock
-    # Patch _find_or_download_model so lifespan's background task never
-    # completes and flips _model_status away from "loading".
-    with patch("app.main._find_or_download_model", side_effect=Exception("blocked")), \
-         patch("app.main.litert_lm.Engine", return_value=MagicMock()):
+    from unittest.mock import patch, AsyncMock
+    async def _noop_load():
+        pass
+    with patch("app.main._load_model_task", _noop_load):
         m._model_status = "loading"
         from fastapi.testclient import TestClient
         from app.main import app
         with TestClient(app, raise_server_exceptions=False) as c:
-            # Force status to loading right before the request so even a
-            # racing background task cannot flip it.
-            m._model_status = "loading"
-            m._load_error = ""
             response = c.post("/api/generate", json={"prompt": "hi"})
     assert response.status_code == 503
 

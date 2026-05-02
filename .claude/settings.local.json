@@ -13,7 +13,13 @@
       "Bash(curl -s -X POST http://localhost:48000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"Hello\"}')",
       "Bash(curl -s http://localhost:48000/health)",
       "Bash(curl -s -X POST http://localhost:48000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"What is 2+2? Answer briefly.\", \"stream\": false}')",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(python3 -m pytest tests/ -v)",
+      "Bash(python3 *)",
+      "Bash(wsl -e bash -c \"cd /home/davron/litert-ai && source .venv/bin/activate && python -m pytest tests/ -x -q 2>&1 | tail -30\")",
+      "Bash(wsl -e bash -c \"cd /home/davron/litert-ai && source .venv/bin/activate && python -m pytest tests/ -x -q 2>&1 | tail -15\")",
+      "Bash(wsl -e bash -c \"cd /home/davron/litert-ai && source .venv/bin/activate && python -m pytest tests/ -x -q 2>&1 | tail -10\")",
+      "Bash(wsl -e bash -c \"cd /home/davron/litert-ai && source .venv/bin/activate && python -c 'import requests; print\\(requests.__version__\\)' && python -c 'import app.main' 2>&1\")"
     ]
   }
 }
